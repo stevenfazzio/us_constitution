@@ -1263,8 +1263,10 @@ graph TB
     SCOTUS -->|Judicial Review| SEN
     SCOTUS -->|Judicial Review| HOUSE
     PRES -->|Enforces Laws| FED
-    CONGRESS[Congress] -->|Creates Lower Courts| FED
-    CONGRESS -->|Override Veto 2/3| PRES
+    SEN -->|Creates Lower Courts| FED
+    HOUSE -->|Creates Lower Courts| FED
+    SEN -->|Override Veto 2/3| PRES
+    HOUSE -->|Override Veto 2/3| PRES
 ```
 
 * **One Supreme Court**: Judicial power vested in one Supreme Court
