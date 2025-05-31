@@ -33,15 +33,17 @@ from datetime import datetime
 from decimal import Decimal
 import math
 
-# Constants
-ORIGINAL_STATES = 13
-CURRENT_STATES = 50
-SENATORS_PER_STATE = 2
-HOUSE_SIZE = 435  # Fixed by Apportionment Act of 1929
-SUPREME_COURT_SIZE = 9  # By tradition, not Constitution
-DC_ELECTORAL_VOTES = 3  # 23rd Amendment
+# Constitutional Constants
+ORIGINAL_STATES = 13  # Article VII
+SENATORS_PER_STATE = 2  # Article I, Section 3: "two Senators from each State"
 
-# Derived constants
+# Statutory/Current Values (not in Constitution)
+CURRENT_STATES = 50  # As admitted by Congress
+HOUSE_SIZE = 435  # Statutory: Apportionment Act of 1929
+SUPREME_COURT_SIZE = 9  # Statutory: Judiciary Act (Congress sets number)
+DC_ELECTORAL_VOTES = 3  # 23rd Amendment (1961)
+
+# Derived values
 SENATE_SIZE = CURRENT_STATES * SENATORS_PER_STATE
 TOTAL_ELECTORAL_VOTES = SENATE_SIZE + HOUSE_SIZE + DC_ELECTORAL_VOTES
 
@@ -175,12 +177,19 @@ class Apportionment:
     direct_taxes: float
 
 def compute_census_apportionment(states: StateCollection) -> List[Apportionment]:
-    """Implements the Huntington-Hill method used since 1940"""
+    """Article I, Section 2: 'according to their respective Numbers'
+    
+    Constitutional requirements:
+    - At least 1 Representative per state
+    - Not exceeding 1 for every 30,000 people (obsolete in practice)
+    
+    Note: Specific method (currently Huntington-Hill) is statutory, not constitutional
+    """
     total_population = sum(s.population for s in states.states)
     if total_population == 0:
         return []
     
-    # First, give each state its guaranteed representative
+    # Constitutional: each state gets at least one representative
     apportionments = []
     for state in states.states:
         apportionments.append(Apportionment(
@@ -189,9 +198,10 @@ def compute_census_apportionment(states: StateCollection) -> List[Apportionment]
             direct_taxes=state.population / total_population
         ))
     
-    # Distribute remaining representatives using Huntington-Hill method
+    # Distribute remaining representatives
+    # (Method is statutory - Constitution doesn't specify how)
     seats_allocated = len(states.states)
-    while seats_allocated < HOUSE_SIZE:
+    while seats_allocated < HOUSE_SIZE:  # HOUSE_SIZE is statutory
         # Find state with highest priority value
         max_priority = -1
         max_state_idx = -1
@@ -199,14 +209,13 @@ def compute_census_apportionment(states: StateCollection) -> List[Apportionment]
         for i, apport in enumerate(apportionments):
             state_pop = states.states[i].population
             current_seats = apport.representatives
-            # Huntington-Hill priority formula
+            # Priority formula (statutory detail)
             priority = state_pop / math.sqrt(current_seats * (current_seats + 1))
             
             if priority > max_priority:
                 max_priority = priority
                 max_state_idx = i
         
-        # Give the next seat to the state with highest priority
         apportionments[max_state_idx].representatives += 1
         seats_allocated += 1
     
@@ -280,30 +289,19 @@ class SenateStructure:
         self.officers: List[Officer] = []
     
     def vote(self, motion: ImpeachmentMotion) -> Verdict:
-        """Conduct impeachment trial vote - requires 2/3 majority for conviction"""
+        """Article I, Section 3: 'no Person shall be convicted without the Concurrence of two thirds'"""
         if not self.senators:
             raise ValueError("No senators present to vote")
         
-        # Simulate vote (in reality, each senator would cast individual vote)
-        # For demonstration, assume votes based on severity
-        guilty_votes = 0
-        total_votes = len(self.senators)
+        # Constitutional requirement: 2/3 of members present
+        votes_needed = math.ceil(len(self.senators) * 2 / 3)
         
-        # Simple simulation: more severe offenses get more votes
-        if motion.target.branch == Branch.EXECUTIVE:
-            if "treason" in [charge.lower() for charge in motion.charges]:
-                guilty_votes = int(total_votes * 0.8)  # 80% vote guilty
-            elif "bribery" in [charge.lower() for charge in motion.charges]:
-                guilty_votes = int(total_votes * 0.7)  # 70% vote guilty
-            else:
-                guilty_votes = int(total_votes * 0.4)  # 40% vote guilty
-        
-        # Need 2/3 majority (67 votes if full Senate)
-        votes_needed = math.ceil(total_votes * 2 / 3)
-        
-        if guilty_votes >= votes_needed:
-            return "guilty"
-        return "not guilty"
+        # In implementation, would need actual vote counts
+        # This is a placeholder that respects constitutional requirement
+        raise NotImplementedError(
+            f"Actual voting requires {votes_needed} guilty votes "
+            f"from {len(self.senators)} senators present"
+        )
 
 def is_senator_eligible(s: Senator) -> bool:
     return (s.age >= 30 and
@@ -311,14 +309,15 @@ def is_senator_eligible(s: Senator) -> bool:
             s.residence == s.state)
 
 def elect_senators(state: State, election_date: datetime) -> List[Senator]:
-    """Elect 2 senators per state (17th Amendment: direct election)"""
-    # In reality, only 1 senator is elected at a time (staggered terms)
-    # This is simplified for demonstration
+    """Article I, Section 3: two Senators from each State
+    Note: 17th Amendment changed from legislature appointment to direct election"""
+    # Constitution specifies 6-year terms in 3 classes, but not the mechanics
+    # This is a simplified implementation
     senators = []
-    for senate_class in [1, 3]:  # Classes rotate every 2 years
+    for senate_class in [1, 3]:  # Classes for staggered terms
         senator = Senator(
             state=state,
-            term_length=6,
+            term_length=6,  # Constitutional: "for six Years"
             senate_class=senate_class,
             age=35,  # Placeholder - would come from election
             citizenship_years=10,  # Placeholder
@@ -643,12 +642,13 @@ class CongressionalPowers:
     
     # Intellectual Property
     @staticmethod
-    def grant_copyright(author: str, work: str, term_years: int = 14) -> "Copyright":
-        # Originally 14 years with one renewal
+    def grant_copyright(author: str, work: str, term_years: int) -> "Copyright":
+        # Constitution: "for limited Times" - specific term set by Congress
         return Copyright(author=author, work=work, term=term_years)
     
     @staticmethod
-    def grant_patent(inventor: str, invention: str, term_years: int = 17) -> "Patent":
+    def grant_patent(inventor: str, invention: str, term_years: int) -> "Patent":
+        # Constitution: "for limited Times" - specific term set by Congress
         return Patent(inventor=inventor, invention=invention, term=term_years)
     
     # Judicial
@@ -1021,7 +1021,7 @@ class VicePresident:
             raise ValueError(f"Vice President {self.name} does not meet constitutional requirements")
     
     def is_eligible(self) -> bool:
-        # Same eligibility as President (12th Amendment)
+        # Same eligibility as President (Note: 12th Amendment made this explicit)
         return (self.age >= 35 and 
                 self.natural_born_citizen and 
                 self.years_resident >= 14)
@@ -1044,8 +1044,8 @@ class ElectoralCollege:
         return senators + representatives
     
     def vote_for_president(self, state_electors: List[Elector]) -> Dict[str, int]:
-        # Originally voted for 2 persons, changed by 12th Amendment
-        # Now separate votes for President and Vice President
+        # Article II, Section 1: Electoral voting process
+        # Note: 12th Amendment changed from voting for 2 persons to separate P/VP votes
         votes = {"president": {}, "vice_president": {}}
         return votes
     
@@ -1081,9 +1081,10 @@ class PresidentialSuccession:
         return "president_continues"
     
     @staticmethod
-    def congress_provides_by_law() -> List[str]:
-        # Congress determines succession after VP
-        return ["speaker_of_house", "president_pro_tempore", "cabinet_by_seniority"]
+    def congress_provides_by_law() -> str:
+        # Constitution: Congress may provide by law for succession after VP
+        # Specific order (Speaker, President Pro Tempore, Cabinet) is statutory
+        return "Congress may by Law provide for the Case"
 
 @dataclass
 class PresidentialCompensation:
@@ -1154,7 +1155,9 @@ class AppointmentPower:
     def appoint_with_senate_consent(position: str, nominee: str, 
                                    senate_majority: bool) -> bool:
         # Major appointments require Senate majority
-        major_positions = ["supreme_court_justice", "ambassador", "cabinet_secretary"]
+        # Article II, Section 2: "Judges of the supreme Court", "Ambassadors",
+        # "other public Ministers and Consuls" require Senate consent
+        major_positions = ["supreme_court_justice", "ambassador", "public_minister", "consul"]
         if position in major_positions:
             return senate_majority
         return False
@@ -1276,7 +1279,8 @@ class ExecutiveEnforcement:
         return {
             "law": law,
             "duty": "take care that laws be faithfully executed",
-            "enforcement_agencies": ["DOJ", "FBI", "US_Marshals"]
+            "constitutional_requirement": "Article II, Section 3"
+            # Note: Specific agencies (DOJ, FBI, etc.) are statutory, not constitutional
         }
     
     def commission_officer(self, officer_name: str, position: str) -> Dict[str, str]:
@@ -1343,7 +1347,7 @@ class RemovalFromOffice:
         return [
             "resignation",
             "death",
-            "inability_under_25th_amendment"
+            "inability"  # Note: 25th Amendment clarified this process
         ]
 
 # Update government structure
@@ -1405,8 +1409,9 @@ class SupremeCourt:
     chief_justice: Judge
     
     def __post_init__(self):
-        if len(self.justices) > SUPREME_COURT_SIZE:  # Historical convention, not constitutional requirement
-            raise ValueError(f"Supreme Court traditionally has {SUPREME_COURT_SIZE} justices")
+        # Note: Constitution doesn't specify number of justices
+        # Current size of 9 is set by Congress, not Constitution
+        pass
 
 @dataclass
 class InferiorCourt:
