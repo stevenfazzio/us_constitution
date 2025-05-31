@@ -94,8 +94,11 @@ class StateCollection:
         return math.ceil(self.count * 3 / 4)
     
     def add_state(self, state: State) -> None:
+        """Add a state to the Union"""
+        if self.get_state(state.name):
+            raise ValueError(f"State {state.name} already exists")
         self.states.append(state)
-        # Would trigger reapportionment
+        # Constitutional: Would trigger reapportionment of House
     
     def get_state(self, name: str) -> Optional[State]:
         for state in self.states:
@@ -130,7 +133,7 @@ class Congress:
 # Government structure classes
 class UnitedStatesGovernment:
     def __init__(self):
-        self.states = UnitedStates_States
+        self.states = UnitedStates_States  # Collection of all states
         self.congress = Congress(
             Senate=LegislativeChamber(
                 members=[],
@@ -149,6 +152,12 @@ class UnitedStatesGovernment:
         return (self.congress is not None and 
                 self.executive is not None and 
                 self.judiciary is not None)
+    
+    def admit_state(self, proposed_state: NewState, congressional_approval: bool) -> bool:
+        """Admit a new state to the Union through proper process"""
+        return StateFormation.admit_new_state(
+            proposed_state, self.states, congressional_approval
+        )
 
 # Initialize the government
 UnitedStates = UnitedStatesGovernment()
@@ -1772,25 +1781,94 @@ class NewState:
 
 class StateFormation:
     @staticmethod
-    def admit_new_states(proposed_state: NewState) -> bool:
-        # Congress admits new states
-        return True  # Subject to restrictions
+    def admit_new_state(proposed_state: NewState, states: StateCollection, 
+                       congressional_approval: bool) -> bool:
+        """Article IV, Section 3: 'New States may be admitted by the Congress'"""
+        # Check if state already exists
+        if states.get_state(proposed_state.name):
+            raise ValueError(f"State {proposed_state.name} already exists")
+        
+        # Congressional approval required
+        if not congressional_approval:
+            return False
+        
+        # Check other constitutional requirements
+        requirements = proposed_state.admission_requirements()
+        if not all([requirements["congressional_approval"], 
+                    requirements["republican_form"]]):
+            return False
+        
+        # Convert NewState to State and add to collection
+        new_state = State(
+            name=proposed_state.name,
+            admitted_date=datetime.now(),
+            population=proposed_state.population,
+            representatives=1,  # Constitutional minimum, reapportionment follows
+            senators=SENATORS_PER_STATE
+        )
+        
+        states.add_state(new_state)
+        # Note: Would trigger reapportionment of House seats
+        return True
     
     @staticmethod
     def form_from_existing_states(states_involved: List[State], 
-                                 consent_given: Dict[State, bool]) -> bool:
-        # Cannot form from existing states without consent
-        # Need consent of state legislatures AND Congress
-        states_consent = all(consent_given.values())
-        return states_consent
+                                 consent_given: Dict[State, bool],
+                                 states: StateCollection,
+                                 new_state_name: str,
+                                 congress_consent: bool) -> bool:
+        """Article IV, Section 3: No new State formed within jurisdiction of another 
+        without consent of legislatures and Congress"""
+        # Need consent from all involved state legislatures
+        if not all(consent_given.values()):
+            return False
+        
+        # Need Congressional consent
+        if not congress_consent:
+            return False
+        
+        # Calculate combined population
+        total_population = sum(
+            s.population for s in states_involved 
+            if states.get_state(s.name)
+        )
+        
+        # Create new state
+        new_state = NewState(
+            name=new_state_name,
+            territory=[s.name for s in states_involved],
+            population=total_population,
+            constitution="to_be_drafted"
+        )
+        
+        # Admit the new state
+        if StateFormation.admit_new_state(new_state, states, congress_consent):
+            # Remove old states from collection
+            for old_state in states_involved:
+                states.states = [s for s in states.states if s.name != old_state.name]
+            return True
+        return False
     
     @staticmethod
     def merge_states(state1: State, state2: State, 
                      legislature1_consent: bool,
                      legislature2_consent: bool,
-                     congress_consent: bool) -> bool:
-        # Junction of states requires all consents
-        return all([legislature1_consent, legislature2_consent, congress_consent])
+                     congress_consent: bool,
+                     states: StateCollection,
+                     merged_name: str) -> bool:
+        """Junction of two or more States requires all consents"""
+        consent_dict = {
+            state1: legislature1_consent,
+            state2: legislature2_consent
+        }
+        
+        return StateFormation.form_from_existing_states(
+            states_involved=[state1, state2],
+            consent_given=consent_dict,
+            states=states,
+            new_state_name=merged_name,
+            congress_consent=congress_consent
+        )
 
 @dataclass
 class Territory:
