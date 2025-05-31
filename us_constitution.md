@@ -26,18 +26,83 @@ tags:
 ### Section 1. Vesting of Legislative Powers
 
 ```python
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Union, Literal
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Union, Literal, Set
 from enum import Enum
+from datetime import datetime
+from decimal import Decimal
 import math
 
-# Type definitions
-State = str
+# Constants
+ORIGINAL_STATES = 13
+CURRENT_STATES = 50
+SENATORS_PER_STATE = 2
+HOUSE_SIZE = 435  # Fixed by Apportionment Act of 1929
+SUPREME_COURT_SIZE = 9  # By tradition, not Constitution
+DC_ELECTORAL_VOTES = 3  # 23rd Amendment
+
+# Derived constants
+SENATE_SIZE = CURRENT_STATES * SENATORS_PER_STATE
+TOTAL_ELECTORAL_VOTES = SENATE_SIZE + HOUSE_SIZE + DC_ELECTORAL_VOTES
 
 class Branch(Enum):
     EXECUTIVE = "executive"
     JUDICIAL = "judicial"
     LEGISLATIVE = "legislative"
+
+@dataclass
+class State:
+    name: str
+    admitted_date: datetime
+    population: int
+    representatives: int = 1  # Minimum 1 per Constitution
+    senators: int = SENATORS_PER_STATE  # Always 2
+    
+    @property
+    def electoral_votes(self) -> int:
+        return self.senators + self.representatives
+    
+    def __hash__(self):
+        return hash(self.name)
+
+@dataclass
+class StateCollection:
+    states: List[State] = field(default_factory=list)
+    
+    @property
+    def count(self) -> int:
+        return len(self.states)
+    
+    @property
+    def total_senators(self) -> int:
+        return self.count * SENATORS_PER_STATE
+    
+    @property
+    def total_representatives(self) -> int:
+        return sum(state.representatives for state in self.states)
+    
+    @property
+    def total_electoral_votes(self) -> int:
+        return sum(state.electoral_votes for state in self.states) + DC_ELECTORAL_VOTES
+    
+    def states_for_amendment_proposal(self) -> int:
+        return math.ceil(self.count * 2 / 3)
+    
+    def states_for_amendment_ratification(self) -> int:
+        return math.ceil(self.count * 3 / 4)
+    
+    def add_state(self, state: State) -> None:
+        self.states.append(state)
+        # Would trigger reapportionment
+    
+    def get_state(self, name: str) -> Optional[State]:
+        for state in self.states:
+            if state.name == name:
+                return state
+        return None
+
+# Initialize the United States
+UnitedStates_States = StateCollection()
 
 @dataclass
 class Officer:
@@ -60,19 +125,31 @@ class Congress:
     Senate: LegislativeChamber
     HouseOfRepresentatives: LegislativeChamber
 
-# Initialize the United States government structure
-UnitedStates = {
-    "Congress": Congress(
-        Senate=LegislativeChamber(
-            members=[],
-            powers=["try impeachments", "confirm appointments", "ratify treaties"]
-        ),
-        HouseOfRepresentatives=LegislativeChamber(
-            members=[],
-            powers=["originate revenue bills", "impeach officials"]
+# Government structure classes
+class UnitedStatesGovernment:
+    def __init__(self):
+        self.states = UnitedStates_States
+        self.congress = Congress(
+            Senate=LegislativeChamber(
+                members=[],
+                powers=["try impeachments", "confirm appointments", "ratify treaties"]
+            ),
+            HouseOfRepresentatives=LegislativeChamber(
+                members=[],
+                powers=["originate revenue bills", "impeach officials"]
+            )
         )
-    )
-}
+        self.executive = None  # Set when President elected
+        self.judiciary = None  # Set when courts established
+    
+    def is_valid(self) -> bool:
+        """Check if government structure is properly initialized"""
+        return (self.congress is not None and 
+                self.executive is not None and 
+                self.judiciary is not None)
+
+# Initialize the government
+UnitedStates = UnitedStatesGovernment()
 ```
 
 All legislative powers defined in this spec are granted to the `Congress` namespace, composed of two modules: `Senate` and `HouseOfRepresentatives`.
@@ -97,22 +174,51 @@ class Apportionment:
     representatives: int
     direct_taxes: float
 
-def compute_census_apportionment(state_populations: Dict[State, int]) -> List[Apportionment]:
-    total_population = sum(state_populations.values())
-    representatives_per_person = 435 / total_population  # Total House seats
+def compute_census_apportionment(states: StateCollection) -> List[Apportionment]:
+    """Implements the Huntington-Hill method used since 1940"""
+    total_population = sum(s.population for s in states.states)
+    if total_population == 0:
+        return []
     
+    # First, give each state its guaranteed representative
     apportionments = []
-    for state, population in state_populations.items():
+    for state in states.states:
         apportionments.append(Apportionment(
             state=state,
-            representatives=max(1, math.floor(population * representatives_per_person)),
-            direct_taxes=population * representatives_per_person
+            representatives=1,  # Constitutional minimum
+            direct_taxes=state.population / total_population
         ))
+    
+    # Distribute remaining representatives using Huntington-Hill method
+    seats_allocated = len(states.states)
+    while seats_allocated < HOUSE_SIZE:
+        # Find state with highest priority value
+        max_priority = -1
+        max_state_idx = -1
+        
+        for i, apport in enumerate(apportionments):
+            state_pop = states.states[i].population
+            current_seats = apport.representatives
+            # Huntington-Hill priority formula
+            priority = state_pop / math.sqrt(current_seats * (current_seats + 1))
+            
+            if priority > max_priority:
+                max_priority = priority
+                max_state_idx = i
+        
+        # Give the next seat to the state with highest priority
+        apportionments[max_state_idx].representatives += 1
+        seats_allocated += 1
+    
+    # Update state objects
+    for i, apport in enumerate(apportionments):
+        states.states[i].representatives = apport.representatives
+    
     return apportionments
 
-def apportion(state_populations: Dict[State, int]) -> List[Apportionment]:
+def apportion(states: StateCollection) -> List[Apportionment]:
     # Note: three_fifths_compromise() is deprecated and retained only for historical context
-    return compute_census_apportionment(state_populations)
+    return compute_census_apportionment(states)
 
 def issue_writ_of_election(state: State) -> None:
     print(f"Writ of election issued for {state}")
@@ -158,22 +264,13 @@ class Senator:
     residence: State
 
 @dataclass
-class VicePresident:
-    name: str
-    tie_breaking_votes_cast: int
-
-@dataclass
 class ChiefJustice:
     name: str
-    court: Literal["Supreme"]
-
-@dataclass
-class President(Official):
-    term: int
+    court: Literal["Supreme"] = "Supreme"
 
 Verdict = Literal["guilty", "not guilty"]
-Member = Union[Representative, Senator]
-PresidingOfficer = Union[VicePresident, ChiefJustice]
+Member = Union["Representative", "Senator"]  # Forward references
+PresidingOfficer = Union["VicePresident", "ChiefJustice"]
 
 class SenateStructure:
     def __init__(self):
@@ -183,23 +280,53 @@ class SenateStructure:
         self.officers: List[Officer] = []
     
     def vote(self, motion: ImpeachmentMotion) -> Verdict:
-        # Requires 2/3 majority for conviction
-        votes_needed = math.ceil(len(self.senators) * 2 / 3)
-        # Actual implementation would count votes
-        return "not guilty"  # placeholder
-
-# Initialize Senate
-Senate = SenateStructure()
+        """Conduct impeachment trial vote - requires 2/3 majority for conviction"""
+        if not self.senators:
+            raise ValueError("No senators present to vote")
+        
+        # Simulate vote (in reality, each senator would cast individual vote)
+        # For demonstration, assume votes based on severity
+        guilty_votes = 0
+        total_votes = len(self.senators)
+        
+        # Simple simulation: more severe offenses get more votes
+        if motion.target.branch == Branch.EXECUTIVE:
+            if "treason" in [charge.lower() for charge in motion.charges]:
+                guilty_votes = int(total_votes * 0.8)  # 80% vote guilty
+            elif "bribery" in [charge.lower() for charge in motion.charges]:
+                guilty_votes = int(total_votes * 0.7)  # 70% vote guilty
+            else:
+                guilty_votes = int(total_votes * 0.4)  # 40% vote guilty
+        
+        # Need 2/3 majority (67 votes if full Senate)
+        votes_needed = math.ceil(total_votes * 2 / 3)
+        
+        if guilty_votes >= votes_needed:
+            return "guilty"
+        return "not guilty"
 
 def is_senator_eligible(s: Senator) -> bool:
     return (s.age >= 30 and
             s.citizenship_years >= 9 and
             s.residence == s.state)
 
-def elect_senators(state: State) -> List[Senator]:
-    # Pre-17th Amendment: chosen by state legislatures
-    # Post-17th Amendment: direct election
-    return []  # placeholder
+def elect_senators(state: State, election_date: datetime) -> List[Senator]:
+    """Elect 2 senators per state (17th Amendment: direct election)"""
+    # In reality, only 1 senator is elected at a time (staggered terms)
+    # This is simplified for demonstration
+    senators = []
+    for senate_class in [1, 3]:  # Classes rotate every 2 years
+        senator = Senator(
+            state=state,
+            term_length=6,
+            senate_class=senate_class,
+            age=35,  # Placeholder - would come from election
+            citizenship_years=10,  # Placeholder
+            residence=state
+        )
+        if is_senator_eligible(senator):
+            senators.append(senator)
+    return senators
 
 def try_impeachment(senate: SenateStructure, motion: ImpeachmentMotion) -> Verdict:
     if not motion.valid:
@@ -391,8 +518,8 @@ class LegislativeProcess:
     @staticmethod
     def override_veto(vetoed_bill: "VetoedBill") -> Optional["Law"]:
         # Requires 2/3 vote in both houses
-        house_override = vetoed_bill.house_votes >= math.ceil(435 * 2 / 3)
-        senate_override = vetoed_bill.senate_votes >= math.ceil(100 * 2 / 3)
+        house_override = vetoed_bill.house_votes >= math.ceil(HOUSE_SIZE * 2 / 3)
+        senate_override = vetoed_bill.senate_votes >= math.ceil(SENATE_SIZE * 2 / 3)
         
         if house_override and senate_override:
             return Law(vetoed_bill.bill)
@@ -594,25 +721,91 @@ class CongressionalPowers:
         # Elastic clause - implied powers
         return Law(type="implied", based_on=for_power)
 
-# Supporting classes
+# Supporting classes for Congressional Powers
 @dataclass
 class Bond:
     amount: Decimal
     purpose: str
-    backing: str
+    backing: str = "full_faith_and_credit"
 
 @dataclass
 class Regulation:
-    scope: str
-    
+    scope: Literal["foreign", "interstate", "indian_tribes"]
+
 @dataclass
 class Currency:
     value: Decimal
-    issuer: str
+    issuer: str = "United States"
 
 @dataclass
 class Court:
-    level: str
+    level: str  # Federal courts "inferior to the Supreme Court"
+
+@dataclass
+class NaturalizationProcess:
+    uniform: bool = True  # Constitution requires uniform rule
+
+@dataclass
+class BankruptcyCode:
+    uniform: bool = True  # Constitution requires uniform laws
+    
+@dataclass
+class CriminalStatute:
+    crime: str
+    punishment: str
+
+@dataclass
+class PostalService:
+    universal_service: bool = True  # Implied by "establish Post Offices"
+
+@dataclass
+class Copyright:
+    author: str
+    work: str
+    term: int  # "limited Times" per Constitution
+
+@dataclass 
+class Patent:
+    inventor: str
+    invention: str
+    term: int  # "limited Times" per Constitution
+
+@dataclass
+class Declaration:
+    type: Literal["war"]  # Congress declares War
+    target: str
+
+@dataclass
+class Letter:
+    type: Literal["marque_and_reprisal"]  # Specific constitutional grant
+
+@dataclass
+class Rules:
+    scope: str  # "Rules concerning Captures on Land and Water"
+
+@dataclass
+class Army:
+    size: int
+    funding_period: int  # "no Appropriation... longer Term than two Years"
+    
+    def __post_init__(self):
+        if self.funding_period > 2:
+            raise ValueError("Army appropriations limited to 2 years")
+
+@dataclass
+class Navy:
+    # "provide and maintain a Navy" - no specific restrictions
+
+@dataclass
+class UniformCodeMilitaryJustice:
+    # "Rules for the Government and Regulation of the land and naval Forces"
+    pass
+
+@dataclass
+class Militia:
+    federal_service: bool
+    purpose: Literal["execute_laws", "suppress_insurrections", "repel_invasions"]
+    # "reserving to the States... Appointment of the Officers"
 ```
 
 * **Fiscal powers**: Taxation, borrowing, spending for enumerated purposes
@@ -795,12 +988,19 @@ class StateCompact:
 
 ```python
 @dataclass
-class President:
-    name: str
+class President(Official):
     age: int
     natural_born_citizen: bool
     years_resident: int
     term_number: int
+    
+    def __post_init__(self):
+        # Enforce eligibility requirements
+        if not self.is_eligible():
+            raise ValueError(f"President {self.name} does not meet constitutional requirements: "
+                           f"age={self.age} (need 35+), "
+                           f"natural_born={self.natural_born_citizen}, "
+                           f"years_resident={self.years_resident} (need 14+)")
     
     def is_eligible(self) -> bool:
         return (self.age >= 35 and 
@@ -813,6 +1013,12 @@ class VicePresident:
     age: int
     natural_born_citizen: bool
     years_resident: int
+    tie_breaking_votes_cast: int = 0
+    
+    def __post_init__(self):
+        # Same eligibility as President (12th Amendment)
+        if not self.is_eligible():
+            raise ValueError(f"Vice President {self.name} does not meet constitutional requirements")
     
     def is_eligible(self) -> bool:
         # Same eligibility as President (12th Amendment)
@@ -853,13 +1059,15 @@ class ElectoralCollege:
 class ExecutivePower:
     president: President
     vice_president: VicePresident
-    cabinet: List[Officer] = None
+    cabinet: List[Officer] = field(default_factory=list)
     
     def __post_init__(self):
-        if self.cabinet is None:
-            self.cabinet = []
+        # President and VP eligibility already checked in their __post_init__
+        # This is redundant but kept for clarity
         if not self.president.is_eligible():
             raise ValueError("President does not meet constitutional requirements")
+        if not self.vice_president.is_eligible():
+            raise ValueError("Vice President does not meet constitutional requirements")
 
     def term_length(self) -> int:
         return 4  # years
@@ -895,11 +1103,8 @@ def presidential_oath() -> str:
             "Office of President of the United States, and will to the best of my "
             "Ability, preserve, protect and defend the Constitution of the United States.")
 
-# Initialize Executive Branch
-UnitedStates["Executive"] = ExecutivePower(
-    president=None,  # To be elected
-    vice_president=None
-)
+# Executive Branch initialization happens after election
+# Cannot create without valid President/VP due to validation
 ```
 
 * **Executive power**: Vested in a President serving 4-year terms
@@ -1200,8 +1405,8 @@ class SupremeCourt:
     chief_justice: Judge
     
     def __post_init__(self):
-        if len(self.justices) > 9:  # Historical convention, not constitutional requirement
-            raise ValueError("Supreme Court traditionally has 9 justices")
+        if len(self.justices) > SUPREME_COURT_SIZE:  # Historical convention, not constitutional requirement
+            raise ValueError(f"Supreme Court traditionally has {SUPREME_COURT_SIZE} justices")
 
 @dataclass
 class InferiorCourt:
@@ -1230,7 +1435,7 @@ class JudicialPower:
         return new_salary
 
 # Initialize the federal judiciary
-UnitedStates["Judiciary"] = JudicialPower()
+# Set through UnitedStates.judiciary when courts are established
 ```
 
 ### Separation of Powers Overview
@@ -1713,13 +1918,13 @@ class AmendmentProcess:
         if method == "congress":
             return {
                 "requirement": "two_thirds_both_houses",
-                "house_threshold": math.ceil(435 * 2 / 3),
-                "senate_threshold": math.ceil(100 * 2 / 3)
+                "house_threshold": math.ceil(HOUSE_SIZE * 2 / 3),
+                "senate_threshold": math.ceil(SENATE_SIZE * 2 / 3)
             }
         else:  # convention
             return {
                 "requirement": "two_thirds_state_legislatures_apply",
-                "states_needed": math.ceil(50 * 2 / 3),
+                "states_needed": UnitedStates_States.states_for_amendment_proposal(),
                 "congress_shall": "call_convention"
             }
     
@@ -1729,7 +1934,7 @@ class AmendmentProcess:
         states_ratifying: int
     ) -> bool:
         # Three-fourths of states must ratify
-        required_states = math.ceil(50 * 3 / 4)  # Currently 38 states
+        required_states = UnitedStates_States.states_for_amendment_ratification()
         return states_ratifying >= required_states
     
     @staticmethod
@@ -1953,7 +2158,7 @@ class StateRatification:
 
 class ConstitutionalRatification:
     REQUIRED_STATES = 9  # Nine states required for establishment
-    ORIGINAL_STATES = 13  # Total states at time of drafting
+    ORIGINAL_STATES = ORIGINAL_STATES  # Total states at time of drafting
     
     @staticmethod
     def ratification_requirement() -> Dict[str, any]:
