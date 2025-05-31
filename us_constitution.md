@@ -406,7 +406,7 @@ class LegislativeHouse:
         self.name = name
         self.members: List[Member] = []
         self.rules = ChamberRules(
-            quorum_percentage=0.51,  # Majority constitutes quorum
+            quorum_percentage=0.50,  # Half (for majority calculation)
             journal_public=True
         )
     
@@ -418,8 +418,10 @@ class LegislativeHouse:
             return is_senator_eligible(member)
     
     def has_quorum(self) -> bool:
+        """Article I, Section 5: 'a Majority of each shall constitute a Quorum'"""
         present_count = sum(1 for m in self.members if m.present)
-        return present_count >= len(self.members) * self.rules.quorum_percentage
+        # Majority means more than half
+        return present_count > len(self.members) * self.rules.quorum_percentage
     
     def compel_attendance(self) -> None:
         # Smaller number may compel attendance of absent members
